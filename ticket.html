@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <title>ticket.js</title>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, target-densitydpi=160dpi, initial-scale=1.0; maximum-scale=1.0; user-scalable=0;">
+  <link rel="stylesheet" media="all" href="docco.css" />
+</head>
+<body>
+  <div id="container">
+    <div id="background"></div>
+    
+      <ul id="jump_to">
+        <li>
+          <a class="large" href="javascript:void(0);">Jump To &hellip;</a>
+          <a class="small" href="javascript:void(0);">+</a>
+          <div id="jump_wrapper">
+          <div id="jump_page">
+            
+              
+              <a class="source" href="client.html">
+                client.js
+              </a>
+            
+              
+              <a class="source" href="endpoints.html">
+                endpoints.js
+              </a>
+            
+              
+              <a class="source" href="index.html">
+                index.js
+              </a>
+            
+              
+              <a class="source" href="scope.html">
+                scope.js
+              </a>
+            
+              
+              <a class="source" href="server.html">
+                server.js
+              </a>
+            
+              
+              <a class="source" href="ticket.html">
+                ticket.js
+              </a>
+            
+          </div>
+        </li>
+      </ul>
+    
+    <ul class="sections">
+        
+          <li id="title">
+              <div class="annotation">
+                  <h1>ticket.js</h1>
+              </div>
+          </li>
+        
+        
+        
+        <li id="section-1">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-1">&#182;</a>
+              </div>
+              <p>Load modules</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="keyword">var</span> Boom = require(<span class="string">'boom'</span>);
+<span class="keyword">var</span> Iron = require(<span class="string">'iron'</span>);
+<span class="keyword">var</span> Cryptiles = require(<span class="string">'cryptiles'</span>);
+<span class="keyword">var</span> Hawk = require(<span class="string">'hawk'</span>);
+<span class="keyword">var</span> Hoek = require(<span class="string">'hoek'</span>);
+<span class="keyword">var</span> Scope = require(<span class="string">'./scope'</span>);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-2">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-2">&#182;</a>
+              </div>
+              <p>Declare internals</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="keyword">var</span> internals = {};
+
+
+internals.defaults = {
+    ticketTTL: <span class="number">60</span> * <span class="number">60</span> * <span class="number">1000</span>,                          <span class="comment">// 1 hour</span>
+    rsvpTTL: <span class="number">1</span> * <span class="number">60</span> * <span class="number">1000</span>,                             <span class="comment">// 1 minute</span>
+    keyBytes: <span class="number">32</span>,                                    <span class="comment">// Ticket secret size in bytes</span>
+    hmacAlgorithm: <span class="string">'sha256'</span>
+};
+
+
+<span class="comment">/*
+    var app = {
+        id: '123',                  // Application id
+        scope: ['a', 'b'],          // Grant scope
+        *secret: 'secret'           // Used in endpoints for Basic auth authentication
+    };
+
+    var grant = {
+        id: 'd832d9283hd9823dh',    // Persitant identifier used to issue additional tickets or revoke access
+        user: '456',                // User id
+        exp: 1352535473414,         // Grant expiration
+        scope: ['b']                // Grant scope
+    };
+
+    var options = {
+        ttl: 60 * 1000,             // 1 min
+        scope: ['b'],               // Ticket scope
+        ext: {                      // Server-specific extension data
+            tos: '0.0.1',
+            private: { x: 1 }       // Anything inside 'private' is only included in the encrypted portion
+        },
+        iron: {}                    // Override Iron defaults
+        keyBytes: 32,               // Hawk key length
+        hmacAlgorithm: 'sha256'     // Hawk algorithm
+    };
+*/</span>
+
+exports.issue = <span class="function"><span class="keyword">function</span> <span class="params">(app, grant, encryptionPassword, options, callback)</span> {</span>
+
+    Hoek.toss(app &amp;&amp; app.id, Boom.internal(<span class="string">'Invalid application object'</span>), callback);
+    Hoek.toss(!grant || (grant.id &amp;&amp; grant.user &amp;&amp; grant.exp), Boom.internal(<span class="string">'Invalid grant object'</span>), callback);
+    Hoek.toss(encryptionPassword, Boom.internal(<span class="string">'Invalid encryption password'</span>), callback);
+    Hoek.toss(options, Boom.internal(<span class="string">'Invalid options object'</span>), callback);
+
+    <span class="keyword">var</span> scope = options.scope || (grant ? grant.scope : <span class="literal">null</span>) || app.scope || [];
+    Hoek.toss(Scope.validate(scope), callback);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-3">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-3">&#182;</a>
+              </div>
+              <p>Construct ticket</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="keyword">var</span> exp = (Hawk.utils.now() + (options.ttl || internals.defaults.ticketTTL));
+    <span class="keyword">if</span> (grant) {
+        exp = Math.min(exp, grant.exp);
+    }
+
+    <span class="keyword">var</span> ticket = {
+        exp: exp,
+        app: app.id,
+        scope: scope
+    };
+
+    <span class="keyword">if</span> (options.ext) {
+        ticket.ext = options.ext;
+    }
+
+    <span class="keyword">if</span> (grant) {
+        ticket.grant = grant.id;
+        ticket.user = grant.user;
+    }
+
+    exports.generate(ticket, encryptionPassword, options, callback);
+};</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-4">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-4">&#182;</a>
+              </div>
+              <p>Reissue ticket</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="comment">/*
+    var options = {
+        ttl: 60 * 1000,                 // 1 min
+        scope: ['b'],                   // Ticket scope (must be equal or lesser than original)
+        grantExp: 1352535473414,        // Grant expiration timestamp
+        issueTo: '123',                 // Delegated to application id
+        ext: {                          // Server-specific extension data
+            tos: '0.0.1',
+            private: { x: 1 }           // Anything inside 'private' is only included in the encrypted portion
+        },
+        iron: {}                        // Override Iron defaults
+        keyBytes: 32,                   // Hawk key length
+        hmacAlgorithm: 'sha256'         // Hawk algorithm
+    };
+*/</span>
+
+exports.reissue = <span class="function"><span class="keyword">function</span> <span class="params">(parentTicket, encryptionPassword, options, callback)</span> {</span>
+
+    Hoek.toss(parentTicket, Boom.internal(<span class="string">'Invalid parent ticket object'</span>), callback);
+    Hoek.toss(encryptionPassword, Boom.internal(<span class="string">'Invalid encryption password'</span>), callback);
+    Hoek.toss(options, Boom.internal(<span class="string">'Invalid options object'</span>), callback);
+    Hoek.toss(!options.scope || Scope.isSubset(parentTicket.scope, options.scope), Boom.forbidden(<span class="string">'New scope is not a subset of the parent ticket scope'</span>), callback);
+    Hoek.toss(!options.issueTo || !parentTicket.dlg, Boom.badRequest(<span class="string">'Cannot re-delegate'</span>), callback);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-5">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-5">&#182;</a>
+              </div>
+              <p>Construct ticket</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="keyword">var</span> exp = (Hawk.utils.now() + (options.ttl || internals.defaults.ticketTTL));
+    <span class="keyword">if</span> (options.grantExp) {
+        exp = Math.min(exp, options.grantExp);
+    }
+
+    <span class="keyword">var</span> ticket = {
+        exp: exp,
+        app: options.issueTo || parentTicket.app,
+        scope: options.scope || parentTicket.scope
+    };
+
+    <span class="keyword">if</span> (options.ext || parentTicket.ext) {
+        ticket.ext = options.ext || parentTicket.ext;
+    }
+
+    <span class="keyword">if</span> (parentTicket.grant) {
+        ticket.grant = parentTicket.grant;
+        ticket.user = parentTicket.user;
+    }
+
+    <span class="keyword">if</span> (options.issueTo) {
+        ticket.dlg = parentTicket.app;
+    }
+    <span class="keyword">else</span> <span class="keyword">if</span> (parentTicket.dlg) {
+        ticket.dlg = parentTicket.dlg;
+    }
+
+    exports.generate(ticket, encryptionPassword, options, callback);
+};
+
+
+<span class="comment">/*</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-6">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-6">&#182;</a>
+              </div>
+              <p>The requesting application</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="keyword">var</span> app = {
+        id: <span class="string">'123'</span>,                  <span class="comment">// Application id</span>
+    };</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-7">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-7">&#182;</a>
+              </div>
+              <p>The resource owner</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    var grant = {
+        id: 'd832d9283hd9823dh'     // Persitant identifier used to issue additional tickets or revoke access
+    };
+
+    var options = {
+        ttl: 1 * 60 * 10000,            // Rsvp TTL
+        iron: {}                        // Override Iron defaults
+    };
+*/
+
+exports.rsvp = function (app, grant, encryptionPassword, options, callback) {
+
+    Hoek.toss(app &amp;&amp; app.id, Boom.internal('Invalid application object'), callback);
+    Hoek.toss(grant &amp;&amp; grant.id, Boom.internal('Invalid grant object'), callback);
+    Hoek.toss(encryptionPassword, Boom.internal('Invalid encryption password'), callback);
+    Hoek.toss(options, Boom.internal('Invalid options object'), callback);
+
+    options.ttl = options.ttl || internals.defaults.rsvpTTL;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-8">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-8">&#182;</a>
+              </div>
+              <p>Construct envelope</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="keyword">var</span> envelope = {
+        app: app.id,
+        exp: Hawk.utils.now() + options.ttl,
+        grant: grant.id
+    };</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-9">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-9">&#182;</a>
+              </div>
+              <p>Stringify and encrypt</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    Iron.seal(envelope, encryptionPassword, options.iron || Iron.defaults, <span class="function"><span class="keyword">function</span> <span class="params">(err, sealed)</span> {</span>
+
+        <span class="keyword">if</span> (err) {
+            <span class="keyword">return</span> callback(err);
+        }
+
+        <span class="keyword">var</span> rsvp = sealed;
+        <span class="keyword">return</span> callback(<span class="literal">null</span>, rsvp);
+    });
+};
+
+
+<span class="comment">/*
+    var ticket = {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-10">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-10">&#182;</a>
+              </div>
+              <p>Inputs into generate()</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        exp:                time <span class="keyword">in</span> msec
+        app:                app id ticked is issued to
+        scope:              ticket scope
+        ext:                application data (child key <span class="string">'private'</span> has special meaning)
+        grant:              grand id
+        user:               user id
+        dlg:                app id of the delegating party</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-11">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-11">&#182;</a>
+              </div>
+              <p>Added by generate()</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        key:                ticket secret key (Hawk)
+        algorithm:          ticket hmac algorithm (Hawk)
+        id:                 ticket key id (Hawk)
+    };
+
+    var options = {
+        iron: {},                       // Override Iron defaults
+        keyBytes: 32,                   // Hawk key length
+        hmacAlgorithm: 'sha256'         // Hawk algorithm
+    };
+*/
+
+exports.generate = function (ticket, encryptionPassword, options, callback) {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-12">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-12">&#182;</a>
+              </div>
+              <p>Generate ticket secret</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="keyword">var</span> random = Cryptiles.randomString(options.keyBytes || internals.defaults.keyBytes);
+    <span class="keyword">if</span> (random <span class="keyword">instanceof</span> Error) {
+        <span class="keyword">return</span> callback(random);
+    }
+
+    ticket.key = random;
+    ticket.algorithm = options.hmacAlgorithm || internals.defaults.hmacAlgorithm;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-13">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-13">&#182;</a>
+              </div>
+              <p>Seal ticket</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    Iron.seal(ticket, encryptionPassword, options.iron || Iron.defaults, <span class="function"><span class="keyword">function</span> <span class="params">(err, sealed)</span> {</span>
+
+        <span class="keyword">if</span> (err) {
+            <span class="keyword">return</span> callback(err);
+        }
+
+        ticket.id = sealed;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-14">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-14">&#182;</a>
+              </div>
+              <p>Hide private ext data</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        <span class="keyword">if</span> (ticket.ext &amp;&amp;
+            ticket.ext.private) {
+
+            <span class="keyword">delete</span> ticket.ext.private;
+        }
+
+        <span class="keyword">return</span> callback(<span class="literal">null</span>, ticket);
+    });
+};</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-15">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-15">&#182;</a>
+              </div>
+              <p>Parse ticket id</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="comment">/*
+    var options = {
+        iron: {}                        // Override Iron defaults
+    };
+*/</span>
+
+exports.parse = <span class="function"><span class="keyword">function</span> <span class="params">(id, encryptionPassword, options, callback)</span> {</span>
+
+    Hoek.toss(encryptionPassword, Boom.internal(<span class="string">'Invalid encryption password'</span>), callback);
+    Hoek.toss(options, Boom.internal(<span class="string">'Invalid options object'</span>), callback);
+
+    Iron.unseal(id, encryptionPassword, options.iron || Iron.defaults, <span class="function"><span class="keyword">function</span> <span class="params">(err, object)</span> {</span>
+
+        <span class="keyword">if</span> (err) {
+            <span class="keyword">return</span> callback(err);
+        }
+
+        <span class="keyword">var</span> ticket = object;
+        ticket.id = id;
+        <span class="keyword">return</span> callback(<span class="literal">null</span>, ticket);
+    });
+};</pre></div></div>
+            
+        </li>
+        
+    </ul>
+  </div>
+</body>
+</html>
